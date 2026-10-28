@@ -345,17 +345,24 @@ Phase 5 defused.
 
 ![六项检查全部通过](images/final.png)
 
-公开测试与非公开 seed、边界 challenge 的验证记录（终端文本，可直接复现）：
+### 非公开 seed 验证（seed 424242）
+
+`424242` 不在 `tests/public.json` 的公开 seed 列表中。下面四张截图是同一次运行的连续记录：六关的 challenge 与公开 seed 42 完全不同（例如第 1 关为 `0x0bb54a66d8f7e4c9a`，seed 42 时为 `0x28efe333b266f103`），说明 `defuser` 实现的是计算关系，而不是固定口令。
+
+![非公开 seed：启动与第 1 关](images/nonpublic1.png)
+
+![非公开 seed：第 1、2 关通过，进入第 3 关](images/nonpublic2.png)
+
+![非公开 seed：第 3 至第 5 关](images/nonpublic3.png)
+
+![非公开 seed：第 6 关与全部通过](images/nonpublic4.png)
+
+公开测试与边界 challenge 的验证记录（终端文本，可直接复现）：
 
 ```text
 $ python3 public_test.py
 Public tests: 60/60
 Secret public tests: 10/10
-
-$ ./defuser --seed 424242 --phase 3 | ./bomb --seed 424242 --phase 3
-Phase 3 challenge: 0xa717c45a6f5d6fc3
-Input (unsigned decimal integers):
-Phase 3 defused.
 
 $ ./defuser --phase 4 --challenge 18446744073709551615 | ./bomb --phase 4 --challenge 18446744073709551615
 Phase 4 challenge: 0xffffffffffffffff
