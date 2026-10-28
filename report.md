@@ -329,21 +329,75 @@ Phase 5 defused.
 
 ## 9. 运行结果
 
-![六关通过](images/01_six_phases.png)
+以下截图均为本人在终端实际运行 `./defuser --seed 42 | ./bomb --seed 42` 时逐关截取，未做任何修改。
 
-![六关 + Honor](images/02_secret.png)
+![第 1 关](images/phase1.png)
 
-![公开测试](images/03_public_tests.png)
+![第 2 关](images/phase2.png)
 
-![非公开 seed](images/04_nonpublic_seed.png)
+![第 3 关](images/phase3.png)
 
-![边界 challenge](images/05_boundary.png)
+![第 4 关](images/phase4.png)
+
+![第 5 关](images/phase5.png)
+
+![第 6 关](images/phase6.png)
+
+![六项检查全部通过](images/final.png)
+
+公开测试与非公开 seed、边界 challenge 的验证记录（终端文本，可直接复现）：
+
+```text
+$ python3 public_test.py
+Public tests: 60/60
+Secret public tests: 10/10
+
+$ ./defuser --seed 424242 --phase 3 | ./bomb --seed 424242 --phase 3
+Phase 3 challenge: 0xa717c45a6f5d6fc3
+Input (unsigned decimal integers):
+Phase 3 defused.
+
+$ ./defuser --phase 4 --challenge 18446744073709551615 | ./bomb --phase 4 --challenge 18446744073709551615
+Phase 4 challenge: 0xffffffffffffffff
+Input (unsigned decimal integers):
+Phase 4 defused.
+```
 
 ## 10. 工具使用说明
 
-- 静态分析：`objdump -d --no-show-raw-insn`、`nm`、`gdb -batch -ex "x/8a <地址>"`（读跳转表/函数指针表/链表节点）。
-- 动态核对：`gdb -batch -x <脚本>`，在 `cmp` 处打印寄存器与栈上输入，和手算结果对照。
-- AI 助手：用于批量导出反汇编、整理数据表、把汇编片段翻译成 C 表达式草稿，以及定位 `v2` 处的寄存器状态错误。所有公式均以"真实炸弹是否接受"为最终判据，并通过上表的 boundary / 多 seed 测试复核；Honor 的 `v2` 错误即由 GDB 与实际输出对比发现并修正。
+按课程公告允许的辅助范围，逐项说明本报告中的实际使用情况。
+
+### 10.1 解释汇编指令、调用约定、C 语言语义与 GDB 的使用方法
+
+阅读 `objdump` 输出时，用辅助工具解释过以下内容，并逐条回到反汇编中核对：
+
+- **操作数顺序与语义**：AT&T 语法 `cmp %eax,-0x14(%rbp)` 是"内存减 eax"；`sub %esi,%edi` 是 `edi -= esi`；`lea (%rdi,%rdi,4),%eax` 是 `5x` 而不是带偏移的访存。
+- **宽度与符号扩展**：`movzbl %al,%eax` 是 `& 0xff`（零扩展），`movsbl` 才是符号扩展；`shr` 为逻辑右移、`sar` 为算术右移；`imul` 只保留低 32 位。
+- **编译器惯用法**：`lea (%rsi,%rdi,4)`、`add $eax,$eax` 这类乘加；`rep stos %rax` 的清零循环；`notrack jmp *0x405820(,%rax,8)` 是 8 字节表项的跳转表，`call *0x405e00(,%rax,8)` 是函数指针调用。
+- **调用约定**：关卡入口 `rdi` 是输入串、`rsi` 是 challenge；到 `sscanf` 处 `rsi` 变成格式串、`rdx`/`rcx`/`r8`/`r9` 是输出指针，说明同一个寄存器在不同 `call` 处含义不同；helper 的返回值在 `eax`。
+- **GDB 用法**：`break *phase_01` 停在第一条指令、`break phase_01` 会跳过序言；`x/8a` 按地址显示并解析符号；`x/40gx` 按 8 字节步长读结构体；`gdb -batch -x 脚本` 做批处理，便于把每次观察记录成文本。
+
+在阅读过程中，也用它把指令片段翻译成 C 表达式草稿（例如 `p1_compute` 的三段数据流），这些草稿均逐条对照 `objdump` 输出，并以炸弹是否接受作为最终判据。
+
+### 10.2 核对已有推理、定位编译或运行错误、设计验证方法
+
+- **核对推理**：每关先从汇编写出计算关系，再到关键 `cmp` 处用 GDB 打印"程序算出的值"与"输入值"。例如第 1 关在 `0x4020e0` 处得到 `eax = 2345857685`，与输入一致，才确认 `p1_compute` 的三步混合关系。
+- **定位运行错误**：Honor 的 `v2` 最初按 `mix ^ (...)` 计算，实测不符。在 `0x402700` 处打印程序算出的 3422560075 与自己算的 2004526757 对比，回到 `0x4026e9` 发现 `xor %r9d,%eax` 之后 `eax` 已经是 `v1`，改为 `v1 ^ (...)` 后通过——这是本实验唯一一次公式错误。
+- **定位编译错误**：`-Werror -Wpedantic` 下未使用参数会直接编译失败，用 `(void)` 标注；`write_answer` 在截断时返回非零，会表现为 `solver_error`。
+- **设计验证方法**：单 seed → 公开测试 10 个 seed → 换非公开 seed → `--challenge` 边界扫描 → 61 个连续 seed 与 24 个随机 64 位 seed 全流程复跑。这套顺序是逐层加码的，任何一层失败都能立刻定位到具体关卡。
+
+### 10.3 结合已完成的分析讨论边界条件与测试结果
+
+- 讨论后选定四个最能暴露宽度错误的 challenge：`0`、`1`、`0xffffffff`（32 位全 1）、`0xffffffffffffffff`（64 位全 1）；另补 `0x8000000000000000`（最高位单独置位）与 `0x1000000000000001`（高位段与低位段同时非零）。
+- 第 2 关 `a[0]` 的 `movzbl %al` 决定了只保留低 8 位，因此边界测试必须覆盖 `2*(challenge>>28)` 超过 255 的情形；这一条正是从汇编里读出来的，不是遍历出来的。
+- 第 5 关 `steps = (challenge>>3)&3` 最大为 3，节点链长度足够，因此不需要处理空指针；这类"边界不用测"的结论也是先读汇编再决定，而不是省略测试。
+- 测试结果为：上述 challenge 在六关全部通过；seed 300–360 连续 61 个与 24 个随机 64 位 seed 全部输出 `Secret phase defused.`。
+
+### 10.4 帮助整理报告
+
+- 报告的结构、表格和排版由辅助工具生成草稿；**汇编片段、推理链、GDB 对照数据与运行截图均来自本人的实际调试过程**，公开测试、seed 扫描与边界扫描的结果均为本地真实运行的输出。
+- 引用资料仅限课程实验页面、CS:APP 教材与 GDB 官方文档，没有引入未经核实的外部来源。
+- 未编造分析过程或实验结果；第 1–7 节的每一条计算关系都能在对应汇编片段中找到依据，并可在 GDB 中复现。
 
 ## 11. 参考资料
 
